@@ -8,9 +8,8 @@ import { parseUtcDate } from "@/modules/appointment/appointment-policy";
 
 function isPaymentCompleted(appointment) {
   return (
-    appointment?.payment?.status === "completed" ||
-    appointment?.paymentStatus === "paid" ||
-    appointment?.status === "Approved"
+    appointment?.paymentStatus === "paid" &&
+    appointment?.payment?.status === "completed"
   );
 }
 
@@ -83,6 +82,14 @@ export async function patchAppointmentStatus(req, context) {
         { error: "Not allowed to modify this appointment" },
         { status: 403 },
       );
+    }
+
+    if (normalizedNewStatus === "Approved") {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (["Confirmed", "completed"].includes(normalizedNewStatus) && !isDoctorOwner) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
     if (newStatus === "Cancelled") {

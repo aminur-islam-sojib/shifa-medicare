@@ -9,7 +9,7 @@ import {
 } from "@/shared/ui/card";
 import { Badge } from "@/shared/ui/badge";
 import Link from "next/link";
-import { confirmPaymentByTransactionId } from "@/modules/payment/payment.service";
+import { getPaymentTransactionDetails } from "@/modules/payment/payment.service";
 
 const Success = async ({
   params,
@@ -17,7 +17,7 @@ const Success = async ({
   params: Promise<{ tran_id: string }>;
 }) => {
   const { tran_id } = await params;
-  const transaction = await confirmPaymentByTransactionId(tran_id);
+  const transaction = await getPaymentTransactionDetails(tran_id);
 
   if (!transaction) {
     return (

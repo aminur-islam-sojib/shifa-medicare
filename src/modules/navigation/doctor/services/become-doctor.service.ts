@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { collections, dbConnect } from "@/infrastructure/db/dbConnect";
 import { findUserByEmail } from "@/infrastructure/lib/legacy/user.service";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/infrastructure/auth/auth.config";
 
 const becomeDoctorSchema = z.object({
   fullName: z.string().min(2),
@@ -26,8 +28,31 @@ const becomeDoctorSchema = z.object({
 
 export async function submitBecomeDoctorApplication(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Unauthorized",
+        },
+        { status: 401 },
+      );
+    }
+
     const body = await request.json();
     const data = becomeDoctorSchema.parse(body);
+
+    const email = data.email.toLowerCase();
+    if (email !== session.user.email.toLowerCase()) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Email must match signed-in account",
+        },
+        { status: 403 },
+      );
+    }
+
     const normalizedAvailableDays = Array.from(new Set(data.availableDays))
       .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
       .sort((a, b) => a - b);
@@ -42,7 +67,6 @@ export async function submitBecomeDoctorApplication(request: NextRequest) {
       );
     }
 
-    const email = data.email.toLowerCase();
     const existingUser = await findUserByEmail(email);
 
     const usersCollection = await dbConnect(collections.USERS);
@@ -150,7 +174,7 @@ export async function submitBecomeDoctorApplication(request: NextRequest) {
         country: data.country,
         zipCode: data.zipCode,
       },
-      role: "doctor",
+      role: existingUser?.role || "patient",
       provider: existingUser?.provider || "credentials",
       isVerified: false,
       status: "active",
@@ -173,7 +197,7 @@ export async function submitBecomeDoctorApplication(request: NextRequest) {
           profileImage: existingUser?.profileImage || null,
         },
       },
-      { upsert: true },
+      { upsert: false },
     );
 
     try {

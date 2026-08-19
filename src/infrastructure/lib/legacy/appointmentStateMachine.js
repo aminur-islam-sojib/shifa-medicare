@@ -20,7 +20,7 @@ export const allowedTransitions = {
   completed: [],
   cancelled: [],
   "no-show": [],
-  PendingPayment: ["Approved", "Cancelled", "Expired"],
+  PendingPayment: ["Cancelled"],
   Approved: ["Confirmed", "Cancelled"],
   Confirmed: ["completed", "Completed", "Cancelled"],
   Completed: [],

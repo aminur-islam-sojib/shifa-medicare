@@ -7,7 +7,7 @@ import { authOptions } from "@/infrastructure/auth/auth.config";
 
 const store_id = process.env.STORE_ID;
 const store_passwd = process.env.STORE_PASSWD;
-const is_live = process.env.SSL_MODE === "true";
+const is_live = process.env.SSL_MODE === "production";
 
 export async function initializePayment(req) {
   try {
@@ -84,7 +84,7 @@ export async function initializePayment(req) {
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment/success/${transactionID}`,
       fail_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment/fail`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment/cancel`,
-      ipn_url: `${process.env.NEXT_PUBLIC_APP_URL}/ipn`,
+      ipn_url: `${process.env.NEXT_PUBLIC_APP_URL}/api/payment/ipn`,
       shipping_method: "Courier",
       product_name: productName,
       product_category: doctor?.specialization || "Telemedicine",
@@ -108,12 +108,15 @@ export async function initializePayment(req) {
       ship_country: "Bangladesh",
       store_id,
       store_passwd,
-      is_live,
     };
+
+    const gatewayUrl = is_live
+      ? "https://securepay.sslcommerz.com/gwprocess/v4/api.php"
+      : "https://sandbox.sslcommerz.com/gwprocess/v4/api.php";
 
     const response = await axios({
       method: "POST",
-      url: process.env.SANDBOX_LINK,
+      url: gatewayUrl,
       data,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",

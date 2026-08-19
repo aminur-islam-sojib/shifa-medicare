@@ -65,10 +65,12 @@ export async function getPaymentTransactionDetails(transactionId: string) {
           payment: 1,
           videoSession: 1,
           doctor: {
+            id: "$doctorInfo._id",
             name: "$doctorInfo.fullName",
             specialization: "$doctorInfo.specialization",
           },
           patient: {
+            id: "$patientInfo._id",
             fullName: "$patientInfo.fullName",
             email: "$patientInfo.email",
             phone: "$patientInfo.phone",
@@ -81,25 +83,59 @@ export async function getPaymentTransactionDetails(transactionId: string) {
   return serialize(result[0] || null);
 }
 
-export async function confirmPaymentByTransactionId(transactionId: string) {
-  if (!transactionId) {
-    throw new Error("Transaction id is required");
+async function querySslcommerz(valId: string) {
+  const base =
+    process.env.SSL_MODE === "production"
+      ? "https://securepay.sslcommerz.com"
+      : "https://sandbox.sslcommerz.com";
+  const url =
+    `${base}/validator/api/validationserverAPI.php` +
+    `?val_id=${encodeURIComponent(valId)}` +
+    `&store_id=${encodeURIComponent(process.env.STORE_ID || "")}` +
+    `&store_passwd=${encodeURIComponent(process.env.STORE_PASSWD || "")}` +
+    `&format=json`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`SSLCommerz query failed with status ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function verifyAndConfirmSslcommerzPayment(input: {
+  valId: string;
+  tranId: string;
+  gatewayStatus: string;
+}) {
+  const { valId, tranId, gatewayStatus } = input;
+  if (!valId || !tranId) {
+    throw Object.assign(new Error("Invalid parameters"), { status: 400 });
+  }
+
+  const validation = await querySslcommerz(valId);
+  if (validation?.status !== "VALID" && validation?.status !== "VALIDATED") {
+    throw Object.assign(new Error("Gateway validation failed"), { status: 402 });
+  }
+  if (String(validation.tran_id) !== tranId) {
+    throw Object.assign(new Error("tran_id mismatch"), { status: 400 });
   }
 
   const appointmentsCollection = await dbConnect(collections.APPOINTMENTS);
-
-  // First, get the appointment to check consultation type
   const appointment = await appointmentsCollection.findOne({
-    "payment.transactionId": transactionId,
+    "payment.transactionId": tranId,
   });
 
   if (!appointment) {
-    return null;
+    throw Object.assign(new Error("Appointment not found"), { status: 404 });
   }
 
-  // Only update if not already paid (idempotent)
+  const expectedAmount = Number(appointment.payment?.amount);
+  const paidAmount = Number(validation.amount ?? validation.currency_amount);
+  if (!Number.isFinite(paidAmount) || Math.abs(paidAmount - expectedAmount) > 0.01) {
+    throw Object.assign(new Error("Amount mismatch"), { status: 400 });
+  }
+
   if (appointment.paymentStatus !== "paid") {
-    const grossAmount = Number(appointment?.payment?.amount || 0);
+    const grossAmount = expectedAmount;
     const doctorRate = 0.8;
     const platformRate = 0.2;
     const doctorAmount = Number((grossAmount * doctorRate).toFixed(2));
@@ -111,6 +147,8 @@ export async function confirmPaymentByTransactionId(transactionId: string) {
         status: "Approved",
         "payment.status": "completed",
         "payment.completedAt": new Date(),
+        "payment.valId": valId,
+        "payment.gatewayStatus": gatewayStatus,
         "payment.distribution": {
           model: "doctor-platform-v1",
           doctorRate,
@@ -123,16 +161,15 @@ export async function confirmPaymentByTransactionId(transactionId: string) {
       },
       $push: {
         auditTrail: {
-          action: "Payment confirmed",
-          performedBy: "Patient",
-          from: "PendingPayment",
+          action: "Payment confirmed via IPN",
+          performedBy: "System",
+          from: appointment.status,
           to: "Approved",
           at: new Date(),
         },
       },
     };
 
-    // Create video session automatically for video consultations
     if (appointment.consultationType === "video") {
       try {
         const callId =
@@ -191,27 +228,21 @@ export async function confirmPaymentByTransactionId(transactionId: string) {
           createdAt: new Date(),
         };
 
-        updatePayload.$push.auditTrail = {
-          $each: [
-            updatePayload.$push.auditTrail,
-            {
-              action: "Video session created",
-              performedBy: "System",
-              from: "Approved",
-              to: "Approved",
-              at: new Date(),
-            },
-          ],
+        updatePayload.$push.auditTrail.$push = {
+          action: "Video session created",
+          performedBy: "System",
+          from: "Approved",
+          to: "Approved",
+          at: new Date(),
         };
       } catch (videoError) {
         console.error("Failed to create video session:", videoError);
-        // Continue with payment confirmation even if video creation fails
       }
     }
 
     await appointmentsCollection.findOneAndUpdate(
       {
-        "payment.transactionId": transactionId,
+        "payment.transactionId": tranId,
         paymentStatus: { $ne: "paid" },
       },
       updatePayload,
@@ -219,6 +250,12 @@ export async function confirmPaymentByTransactionId(transactionId: string) {
     );
   }
 
-  const details = await getPaymentTransactionDetails(transactionId);
-  return serialize(details || null);
+  return getPaymentTransactionDetails(tranId);
+}
+
+export async function confirmPaymentByTransactionId(transactionId: string) {
+  if (!transactionId) {
+    throw new Error("Transaction id is required");
+  }
+  return getPaymentTransactionDetails(transactionId);
 }

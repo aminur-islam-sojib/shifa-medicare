@@ -76,6 +76,7 @@ export async function createAppointment(req) {
             status: 1,
             isBanned: 1,
             moderation: 1,
+            consultationFee: 1,
           },
         },
       ),
@@ -212,9 +213,12 @@ export async function createAppointment(req) {
       .toString()
       .padStart(5, "0")}`;
 
-    const payableAmount = Number.isFinite(Number(amount))
-      ? Number(amount)
-      : 500;
+    const payableAmount =
+      doctorProfile?.consultationFee !== undefined &&
+      doctorProfile?.consultationFee !== null &&
+      Number.isFinite(Number(doctorProfile.consultationFee))
+        ? Number(doctorProfile.consultationFee)
+        : 500;
     const doctorRate = 0.8;
     const platformRate = 0.2;
     const doctorAmount = Number((payableAmount * doctorRate).toFixed(2));
